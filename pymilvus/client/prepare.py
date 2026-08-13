@@ -956,7 +956,7 @@ class Prepare:
 
         function_output_field_names = Prepare._function_output_field_names(fields_info)
         fields_data = {
-            field["name"]: schema_types.FieldData(field_name=field["name"], type=field["type"])
+            field["name"]: request.fields_data.add(field_name=field["name"], type=field["type"])
             for field in input_fields_info
         }
         field_info_map = {field["name"]: field for field in input_fields_info}
@@ -974,7 +974,7 @@ class Prepare:
         ) = Prepare._setup_struct_data_structures(struct_fields_info)
 
         if enable_dynamic:
-            d_field = schema_types.FieldData(
+            d_field = request.fields_data.add(
                 field_name=DYNAMIC_FIELD_NAME, is_dynamic=True, type=DataType.JSON
             )
             fields_data[d_field.field_name] = d_field
@@ -1075,7 +1075,6 @@ class Prepare:
         for field_data in fields_data.values():
             entity_helper.flush_vector_bytes(field_data, vector_bytes_cache)
 
-        request.fields_data.extend(fields_data.values())
         request.fields_data.extend(struct_fields_data.values())
 
         expected_num_input_fields = (

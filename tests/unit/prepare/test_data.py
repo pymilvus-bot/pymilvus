@@ -1,6 +1,7 @@
 """Tests for data operation Prepare methods (insert, upsert, delete)."""
 
 import json
+from unittest.mock import Mock
 
 import numpy as np
 import pytest
@@ -8,6 +9,7 @@ from pymilvus import CollectionSchema, DataType, FieldSchema
 from pymilvus.client.constants import DYNAMIC_FIELD_NAME
 from pymilvus.client.prepare import Prepare
 from pymilvus.exceptions import DataNotMatchException, ParamError
+from pymilvus.grpc_gen import milvus_pb2, schema_pb2
 from pymilvus.orm.schema import StructFieldSchema
 
 from .conftest import make_fields_info, make_struct_fields_info
@@ -40,6 +42,40 @@ class TestRowInsertParam:
         ]
         req = Prepare.row_insert_param("test_coll", rows, "", fields_info=make_fields_info(schema))
         assert req.num_rows == 2
+
+    def test_insert_builds_regular_fields_directly_in_request_without_changing_wire_data(
+        self, monkeypatch
+    ):
+        """Test row insert avoids standalone FieldData without changing its wire data."""
+        fields_info = [
+            {"name": "pk", "type": DataType.INT64, "is_primary": True},
+            {"name": "vector", "type": DataType.FLOAT_VECTOR, "params": {"dim": 2}},
+        ]
+        rows = [
+            {"pk": 1, "vector": [1.0, 2.0]},
+            {"pk": 2, "vector": [3.0, 4.0]},
+        ]
+        field_data = Mock(wraps=schema_pb2.FieldData)
+        monkeypatch.setattr("pymilvus.client.prepare.schema_types.FieldData", field_data)
+
+        req = Prepare.row_insert_param("test_coll", rows, "", fields_info=fields_info)
+
+        field_data.assert_not_called()
+        assert [field.field_name for field in req.fields_data] == ["pk", "vector"]
+        assert list(req.fields_data[0].scalars.long_data.data) == [1, 2]
+        assert req.fields_data[1].vectors.dim == 2
+        assert list(req.fields_data[1].vectors.float_vector.data) == [1.0, 2.0, 3.0, 4.0]
+
+        expected = milvus_pb2.InsertRequest(collection_name="test_coll", num_rows=2)
+        expected.fields_data.add(
+            field_name="pk", type=DataType.INT64
+        ).scalars.long_data.data.extend([1, 2])
+        expected_vector = expected.fields_data.add(field_name="vector", type=DataType.FLOAT_VECTOR)
+        expected_vector.vectors.dim = 2
+        expected_vector.vectors.float_vector.data.extend([1.0, 2.0, 3.0, 4.0])
+        assert req.SerializeToString(deterministic=True) == expected.SerializeToString(
+            deterministic=True
+        )
 
     def test_insert_entity_not_dict(self):
         """Test insert with non-dict entity raises error."""
@@ -252,6 +288,8 @@ class TestRowInsertParam:
             enable_dynamic=True,
         )
         assert req.num_rows == 1
+        assert [field.field_name for field in req.fields_data] == ["pk", "vector", "$meta"]
+        assert json.loads(req.fields_data[-1].scalars.json_data.data[0]) == {"extra": "field"}
 
     def test_insert_missing_required_field(self):
         """Test insert with missing required field."""
