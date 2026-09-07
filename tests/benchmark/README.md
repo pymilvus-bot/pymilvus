@@ -1,6 +1,6 @@
 # pymilvus MilvusClient Benchmarking Suite
 
-This benchmark suite measures client-side performance of pymilvus MilvusClient API operations (search, query, hybrid search) without requiring a running Milvus server.
+This benchmark suite measures client-side performance of pymilvus MilvusClient API operations (insert, search, query, hybrid search) without requiring a running Milvus server.
 
 ## Overview
 
@@ -17,6 +17,7 @@ tests/benchmark/
 ├── README.md                # This file - complete guide
 ├── conftest.py              # Mock gRPC stubs & shared fixtures
 ├── mock_responses.py        # Fake protobuf response builders
+├── test_insert_bench.py     # Row-insert packing and serialization memory benchmark
 ├── test_search_bench.py     # Search timing benchmarks
 └── scripts/
     ├── profile_cpu.sh       # CPU profiling wrapper
@@ -40,6 +41,9 @@ make benchmark
 
 # Run specific benchmark
 pytest tests/benchmark/test_search_bench.py::TestSearchBench::test_search_float32_varying_output_fields --benchmark-only
+
+# Run row-insert memory bounds in fresh worker processes (Linux + upb)
+pytest tests/benchmark/test_insert_bench.py --benchmark-only
 
 # Save baseline for comparison
 pytest tests/benchmark/ --benchmark-only --benchmark-save=baseline

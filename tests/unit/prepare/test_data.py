@@ -1,6 +1,7 @@
 """Tests for data operation Prepare methods (insert, upsert, delete)."""
 
 import json
+from types import SimpleNamespace
 from unittest.mock import Mock
 
 import numpy as np
@@ -13,6 +14,27 @@ from pymilvus.grpc_gen import milvus_pb2, schema_pb2
 from pymilvus.orm.schema import StructFieldSchema
 
 from .conftest import make_fields_info, make_struct_fields_info
+
+
+class _LegacyFieldDataList:
+    """Build standalone fields and copy them when struct fields are appended."""
+
+    def __init__(self, destination):
+        self._destination = destination
+        self._staged = []
+
+    def add(self, **kwargs):
+        field = schema_pb2.FieldData(**kwargs)
+        self._staged.append(field)
+        return field
+
+    def extend(self, fields):
+        self._destination.extend(self._staged)
+        self._staged.clear()
+        self._destination.extend(fields)
+
+    def __len__(self):
+        return len(self._destination)
 
 
 class TestRowInsertParam:
@@ -74,6 +96,126 @@ class TestRowInsertParam:
         expected_vector.vectors.dim = 2
         expected_vector.vectors.float_vector.data.extend([1.0, 2.0, 3.0, 4.0])
         assert req.SerializeToString(deterministic=True) == expected.SerializeToString(
+            deterministic=True
+        )
+
+    @pytest.mark.parametrize(
+        ("fields_info", "rows", "enable_dynamic", "struct_fields_info"),
+        [
+            pytest.param(
+                [
+                    {"name": "pk", "type": DataType.INT64, "is_primary": True},
+                    {"name": "vector", "type": DataType.FLOAT_VECTOR, "params": {"dim": 2}},
+                ],
+                [{"pk": 1, "vector": [1.0, 2.0]}],
+                False,
+                [],
+                id="regular",
+            ),
+            pytest.param(
+                [
+                    {"name": "pk", "type": DataType.INT64, "is_primary": True},
+                    {"name": "vector", "type": DataType.FLOAT_VECTOR, "params": {"dim": 2}},
+                ],
+                [{"pk": 1, "vector": [1.0, 2.0], "extra": "dynamic"}],
+                True,
+                [],
+                id="dynamic",
+            ),
+            pytest.param(
+                [
+                    {"name": "pk", "type": DataType.INT64, "is_primary": True},
+                    {"name": "note", "type": DataType.VARCHAR, "nullable": True},
+                ],
+                [{"pk": 1, "note": None}, {"pk": 2}],
+                False,
+                [],
+                id="nullable",
+            ),
+            pytest.param(
+                [
+                    {"name": "pk", "type": DataType.INT64, "is_primary": True},
+                    {
+                        "name": "vector",
+                        "type": DataType.FLOAT16_VECTOR,
+                        "params": {"dim": 4},
+                    },
+                ],
+                [{"pk": 1, "vector": np.array([1, 2, 3, 4], dtype=np.float16)}],
+                False,
+                [],
+                id="float16-vector",
+            ),
+            pytest.param(
+                [
+                    {"name": "pk", "type": DataType.INT64, "is_primary": True},
+                    {"name": "vector", "type": DataType.BINARY_VECTOR, "params": {"dim": 8}},
+                ],
+                [{"pk": 1, "vector": bytes([0b10101010])}],
+                False,
+                [],
+                id="binary-vector",
+            ),
+            pytest.param(
+                [
+                    {"name": "pk", "type": DataType.INT64, "is_primary": True},
+                    {"name": "vector", "type": DataType.FLOAT_VECTOR, "params": {"dim": 2}},
+                ],
+                [
+                    {
+                        "pk": 1,
+                        "vector": [1.0, 2.0],
+                        "metadata": [{"score": 0.5}],
+                        "extra": "dynamic",
+                    }
+                ],
+                True,
+                [
+                    {
+                        "name": "metadata",
+                        "type": DataType._ARRAY_OF_STRUCT,
+                        "fields": [
+                            {
+                                "name": "score",
+                                "type": DataType.ARRAY,
+                                "element_type": DataType.FLOAT,
+                                "params": {"max_capacity": 4},
+                            }
+                        ],
+                    }
+                ],
+                id="struct-and-dynamic",
+            ),
+        ],
+    )
+    def test_row_insert_compaction_preserves_legacy_wire_data(
+        self, fields_info, rows, enable_dynamic, struct_fields_info
+    ):
+        legacy = milvus_pb2.InsertRequest(
+            collection_name="test_coll", partition_name="", num_rows=len(rows)
+        )
+        legacy_builder = SimpleNamespace(fields_data=_LegacyFieldDataList(legacy.fields_data))
+        Prepare._parse_row_request(
+            legacy_builder,
+            fields_info,
+            struct_fields_info,
+            enable_dynamic,
+            rows,
+        )
+
+        compacted = Prepare.row_insert_param(
+            "test_coll",
+            rows,
+            "",
+            fields_info=fields_info,
+            struct_fields_info=struct_fields_info,
+            enable_dynamic=enable_dynamic,
+        )
+
+        assert [field.field_name for field in compacted.fields_data] == [
+            field.field_name for field in legacy.fields_data
+        ]
+        assert compacted.SerializeToString(deterministic=True) == legacy.SerializeToString(
             deterministic=True
         )
 

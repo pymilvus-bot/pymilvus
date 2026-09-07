@@ -22,6 +22,7 @@ from .client.asynch import SearchFuture
 from .client.bloom_filter import BloomFilterBuilder, build_bloom_filter
 from .client.field_ops import FieldOp, FieldOpType
 from .client.prepare import Prepare
+from .client.roaring_filter import RoaringBitmapBuilder, build_roaring_bitmap
 from .client.search_aggregation import (
     AggregationBucket,
     AggregationHit,
@@ -132,6 +133,7 @@ __all__ = [
     "RRFRanker",
     "Replica",
     "ResourceGroupInfo",
+    "RoaringBitmapBuilder",
     "Role",
     "SearchAggregation",
     "SearchFuture",
@@ -144,6 +146,7 @@ __all__ = [
     "WeightedRanker",
     "__version__",
     "build_bloom_filter",
+    "build_roaring_bitmap",
     "connections",
     "create_resource_group",
     "create_user",

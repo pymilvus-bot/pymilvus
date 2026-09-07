@@ -1316,9 +1316,16 @@ class Prepare:
             namespace=namespace,
         )
 
-        return cls._parse_row_request(
+        request = cls._parse_row_request(
             request, fields_info, struct_fields_info, enable_dynamic, entities
         )
+        # Growing repeated fields in upb retains superseded buffers in the parent arena.
+        # Reparse after _parse_row_request releases its child-message wrappers so the returned
+        # request owns compact repeated fields without the staging copy's higher transient peak.
+        packed_request = request.SerializeToString()
+        request_type = type(request)
+        del request
+        return request_type.FromString(packed_request)
 
     @classmethod
     def row_upsert_param(
